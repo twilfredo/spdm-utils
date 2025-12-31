@@ -21,6 +21,7 @@ use libspdm::responder::CertModel;
 use libspdm::spdm;
 use libtock::console::Console;
 use libtock::runtime::{set_main, stack_size};
+use alloc::vec::Vec;
 
 mod libc_stubs;
 mod mctp;
@@ -75,10 +76,11 @@ fn main() {
     )
     .unwrap();
 
+    let spdm_ver: Vec<u16> = vec![libspdm::libspdm_rs::SPDM_MESSAGE_VERSION_13 as u16];
     responder::setup_capabilities(
         cntx_ptr,
         0,
-        Some(u8::try_from(libspdm::libspdm_rs::SPDM_MESSAGE_VERSION_13).unwrap()),
+        Some(&spdm_ver),
         SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_ECDSA_ECC_NIST_P384,
         SPDM_ALGORITHMS_BASE_HASH_ALGO_TPM_ALG_SHA_384,
         CertModel::Alias,
