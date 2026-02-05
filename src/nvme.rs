@@ -57,26 +57,21 @@ unsafe extern "C" fn nvme_send_message(
 ) -> u32 {
     debug!("Sending NVMe Security Send: SPDM Message");
     let message = message_ptr as *const u8;
-    let mut dptr = unsafe { from_raw_parts(message, message_size) }.to_vec();
+    let dptr = unsafe { from_raw_parts(message, message_size) }.to_vec();
 
     match &mut *NVME_DEV.lock().unwrap() {
         Some(dev) => {
             // Setup a security receive command for security protocol discovery
-            let mut cmd = match NvmeSecSendCmds::gen_libspdm_encoded_sec_send_args(
-                &mut dptr,
-                message_size,
-                dev.nsid,
-            ) {
+            let mut cmd = match NvmeSecSendCmds::new(dptr, dev.nsid) {
                 Ok(cmd) => cmd,
                 Err(why) => {
                     panic!("Failed to generate SPDM Message Command: {:?}", why)
                 }
             };
 
-            debug!("NVME Storage Message Cmd: {:?}", cmd);
-            debug!("SPDM Request: {:x?}", &dptr[..message_size]);
-
-            if let Err(why) = dev.nvme_sec_send(&mut cmd, timeout_us) {
+            cmd.debug_log().unwrap();
+            let mut nvme_sec_send_args = cmd.get_args_mut().unwrap();
+            if let Err(why) = dev.nvme_sec_send(&mut nvme_sec_send_args, timeout_us) {
                 panic!("Failed to security send: {:?}", why);
             }
         }
@@ -342,21 +337,46 @@ impl Drop for NvmeDev {
     }
 }
 
-struct NvmeSecSendCmds;
+struct NvmeSecSendCmds {
+    data: Option<Vec<u8>>,
+    args: Option<nvme_security_send_args>,
+}
 struct NvmeSecRecvCmds;
 
 impl NvmeSecSendCmds {
+    pub fn new(data: Vec<u8>, nsid: u32) -> Result<Self, Errno> {
+        let len = data.len();
+        let mut data = data;
+        let args = NvmeSecSendCmds::gen_libspdm_encoded_sec_send_args(&mut data, len, nsid)?;
+        Ok(Self {
+            data: Some(data),
+            args: Some(args),
+        })
+    }
+
+    pub fn get_args_mut(&mut self) -> Option<&mut nvme_security_send_args> {
+        self.args.as_mut()
+    }
+
+    pub fn get_args(&self) -> Option<&nvme_security_send_args> {
+        self.args.as_ref()
+    }
+    pub fn get_data(&self) -> Option<&Vec<u8>> {
+        self.data.as_ref()
+    }
+
+    pub fn debug_log(&self) -> Result<(),()> {
+        debug!("SPDM Request: {:x?}", self.get_data().ok_or(())?);
+        let nvme_sec_send_args = self.get_args().ok_or(())?;
+        debug!("NVME Storage Message Cmd: {:?}", nvme_sec_send_args);
+        Ok(())
+    }
+
     /// # Summary
     ///
     /// Generates an @nvme_security_send_args suitable for an `SPDM Storage
     /// Message`. @dptr shall be the message buffer that contains the SPDM
     /// request data (with transport encoding from libspdm).
-    ///
-    /// # Note
-    ///
-    ///  A mutable reference to @dptr is stored within the returned struct, thus,
-    ///  the underlying memory pointed to by @dptr must not be free(d) until
-    ///  after the data is transferred. Ex: after invoking `nvme_security_send()`.
     ///
     /// # Parameter
     ///
