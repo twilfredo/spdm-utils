@@ -502,39 +502,43 @@ impl SgCmd {
         }
         Ok(())
     }
-}
 
-/// # Summary
-///
-/// Given a fulfilled sense response from the device, log the Sense Key, ASC
-/// and ASCQ and return the sense_key and asc_ascq concatenated.
-///
-/// # Parameter
-///
-/// * `cmd`: SgCmd in flight
-///
-/// # Returns
-///
-/// Some<(sense_key, asc_ascq)>, if valid
-/// None, if not set
-fn log_and_get_sense(cmd: &SgCmd) -> Option<(u8, u16)> {
-    if ((cmd.sbp[0] & 0x7F) == 0x72) || ((cmd.sbp[0] & 0x7F) == 0x73) {
-        let sense_key = cmd.sbp[1] & 0x0F;
-        let asc_ascq = ((cmd.sbp[2] as u16) << 8) | cmd.sbp[3] as u16;
-        warn!("sense_key: 0x{sense_key:x?}");
-        warn!("asc_ascq: 0x{asc_ascq:x?}");
-        return Some((sense_key, asc_ascq));
-    }
+    /// # Summary
+    ///
+    /// Given a fulfilled sense response from the device, log the Sense Key, ASC
+    /// and ASCQ and return the sense_key and asc_ascq concatenated.
+    ///
+    /// # Returns
+    ///
+    /// Some<(sense_key, asc_ascq)>, if valid
+    /// None, if not set
+    fn log_and_get_sense(&self) -> Option<(u8, u16)> {
+        /// Parse sense data and log it. Helper function to extract sense_key and asc_ascq
+        /// from the sense buffer at the specified offsets.
+        fn parse_and_log_sense(
+            sbp: &[u8],
+            sense_key_offset: usize,
+            asc_offset: usize,
+            ascq_offset: usize,
+        ) -> (u8, u16) {
+            let sense_key = sbp[sense_key_offset] & 0x0F;
+            let asc_ascq = ((sbp[asc_offset] as u16) << 8) | sbp[ascq_offset] as u16;
+            warn!("sense_key: 0x{sense_key:x?}");
+            warn!("asc_ascq: 0x{asc_ascq:x?}");
+            (sense_key, asc_ascq)
+        }
 
-    if ((cmd.sbp[0] & 0x7F) == 0x70) || ((cmd.sbp[0] & 0x7F) == 0x71) {
-        let sense_key = cmd.sbp[2] & 0x0F;
-        let asc_ascq = ((cmd.sbp[12] as u16) << 8) | cmd.sbp[13] as u16;
-        warn!("sense_key: 0x{sense_key:x?}");
-        warn!("asc_ascq: 0x{asc_ascq:x?}");
-        return Some((sense_key, asc_ascq));
+        let response_code = self.sbp[0] & 0x7F;
+
+        match response_code {
+            0x72 | 0x73 => Some(parse_and_log_sense(&self.sbp, 1, 2, 3)),
+            0x70 | 0x71 => Some(parse_and_log_sense(&self.sbp, 2, 12, 13)),
+            _ => {
+                debug!("No sense detected");
+                None
+            }
+        }
     }
-    debug!("No sense detected");
-    None
 }
 
 /// # Summary
@@ -560,7 +564,7 @@ pub fn cmd_scsi_get_sec_info(path: &String) -> Result<(), Errno> {
     // 3. Execute CMD
     if let Some(fd) = &dev.fd {
         if let Err(e) = cmd.scsi_cmd_exec(*fd) {
-            if let Some((sense_key, asc_ascq)) = log_and_get_sense(&cmd) {
+            if let Some((sense_key, asc_ascq)) = cmd.log_and_get_sense() {
                 if sense_key == 0x06 && asc_ascq == 0x2900 {
                     // This is a Power ON/Reset/Bus Reset condition, maybe the drive
                     // wasn't initialized. Retry the command, if it fails again,
@@ -789,7 +793,9 @@ unsafe extern "C" fn scsi_receive_message(
             unsafe { *message_size = LIBSPDM_MAX_SPDM_MSG_SIZE as usize };
 
             info!("received_bytes: {:?}", unsafe { *message_size });
-            info!("spdm-received: {:x?}", unsafe { &msg_buf[0..*message_size] });
+            info!("spdm-received: {:x?}", unsafe {
+                &msg_buf[0..*message_size]
+            });
         }
         None => unreachable!("SCSI device lost"),
     }
