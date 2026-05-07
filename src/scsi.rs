@@ -223,7 +223,9 @@ impl SgCmd {
         let mut sg_io_hdr: sg_io_hdr_t = unsafe { std::mem::zeroed() };
         // 'S' for SCSI generic/SG (required)
         sg_io_hdr.interface_id = b'S' as i32;
+        // TODO: Convert to const SG_TIMEOUT_MS
         sg_io_hdr.timeout = 30000;
+        // TODO: Convert to const SG_FLAG_AT_TAIL
         // At tail
         sg_io_hdr.flags = 0x10;
 
@@ -280,6 +282,7 @@ impl SgCmd {
         // Setup Inquiry Command
         // OpCode
         sg_cmd.cmdp[0] = CmdType::Inquiry.into();
+        // TODO: Convert offsets to const INQUIRY_ALLOC_LEN_OFFSET
         // Allocation Bytes
         sg_cmd.cmdp[3..=4].copy_from_slice(&(bufsz.to_be_bytes()));
 
@@ -314,6 +317,7 @@ impl SgCmd {
         sg_cmd.cmdp[0] = CmdType::SecurityProtocolIn.into();
         // Security Protocol
         sg_cmd.cmdp[1] = SpcSecurityProtocols::SecurityProtocolInformation.into();
+        // TODO: Convert CDB offsets to named constants
         // Security Protocol Specific
         // This should be updated at the transport level, at this stage
         // we don't know the message type/connection type.
@@ -357,6 +361,7 @@ impl SgCmd {
 
         // Setup Security Out Command for SPDM request [IF-SEND]
         // OpCode
+        // TODO: Convert CDB offsets to named constants
         sg_cmd.cmdp[0] = CmdType::SecurityProtocolOut.into();
         sg_cmd.cmdp[1] = hdr.security_protocol;
         // All fields in the storage transport are little endian
@@ -370,6 +375,7 @@ impl SgCmd {
         let transfer_len: u32 = (msg_length - LIBSPDM_STORAGE_TRANSPORT_HEADER_SIZE as usize)
             .try_into()
             .unwrap();
+        // TODO: Convert CDB offsets to named constants
         sg_cmd.cmdp[6..=9].copy_from_slice(&transfer_len.to_be_bytes());
         sg_cmd.cmdp[10] = 0;
         sg_cmd.cmdp[11] = 0;
@@ -409,6 +415,7 @@ impl SgCmd {
         unsafe {
             libspdm_storage_encode_message(
                 ptr::null_mut(),
+                // TODO: Convert to const LIBSPDM_STORAGE_NO_SESSION
                 0,
                 message_size - header_len,
                 message as *mut _ as *mut c_void,
@@ -424,6 +431,7 @@ impl SgCmd {
 
         // Setup Security In Command for SPDM response [IF-RECV]
         // OpCode
+        // TODO: Convert CDB offsets to named constants
         sg_cmd.cmdp[0] = CmdType::SecurityProtocolIn.into();
         sg_cmd.cmdp[1] = hdr.security_protocol;
         // All fields in the storage transport are little endian
@@ -437,6 +445,7 @@ impl SgCmd {
         let allocation_len: u32 = (message_size - LIBSPDM_STORAGE_TRANSPORT_HEADER_SIZE as usize)
             .try_into()
             .unwrap();
+        // TODO: Convert CDB offsets to named constants
         sg_cmd.cmdp[6..=9].copy_from_slice(&allocation_len.to_be_bytes());
         sg_cmd.cmdp[10] = 0;
         sg_cmd.cmdp[11] = 0;
@@ -521,6 +530,7 @@ impl SgCmd {
             asc_offset: usize,
             ascq_offset: usize,
         ) -> (u8, u16) {
+            // TODO: Convert to const SENSE_KEY_MASK
             let sense_key = sbp[sense_key_offset] & 0x0F;
             let asc_ascq = ((sbp[asc_offset] as u16) << 8) | sbp[ascq_offset] as u16;
             warn!("sense_key: 0x{sense_key:x?}");
@@ -528,10 +538,13 @@ impl SgCmd {
             (sense_key, asc_ascq)
         }
 
+        // TODO: Convert to const SENSE_RESPONSE_CODE_MASK
         let response_code = self.sbp[0] & 0x7F;
 
         match response_code {
+            // TODO: Convert to const SENSE_DESCRIPTOR_CURRENT/DEFERRED and offsets
             0x72 | 0x73 => Some(parse_and_log_sense(&self.sbp, 1, 2, 3)),
+            // TODO: Convert to const SENSE_FIXED_CURRENT/DEFERRED and offsets
             0x70 | 0x71 => Some(parse_and_log_sense(&self.sbp, 2, 12, 13)),
             _ => {
                 debug!("No sense detected");
@@ -557,6 +570,7 @@ impl SgCmd {
 pub fn cmd_scsi_get_sec_info(path: &String) -> Result<(), Errno> {
     // 1. Open device
     let dev = BlkDev::new(path, OFlag::O_RDWR)?;
+    // TODO: Convert to const SECURITY_PROTOCOL_LIST_BUFFER_SIZE
     // The actual buffer has a fixed length much larger
     let bufsz = 256;
     // 2. Generate command
@@ -565,6 +579,7 @@ pub fn cmd_scsi_get_sec_info(path: &String) -> Result<(), Errno> {
     if let Some(fd) = &dev.fd {
         if let Err(e) = cmd.scsi_cmd_exec(*fd) {
             if let Some((sense_key, asc_ascq)) = cmd.log_and_get_sense() {
+                // TODO: Convert to const SENSE_KEY_UNIT_ATTENTION, ASC_ASCQ_POWER_ON_RESET
                 if sense_key == 0x06 && asc_ascq == 0x2900 {
                     // This is a Power ON/Reset/Bus Reset condition, maybe the drive
                     // wasn't initialized. Retry the command, if it fails again,
@@ -582,6 +597,7 @@ pub fn cmd_scsi_get_sec_info(path: &String) -> Result<(), Errno> {
         return Err(Errno::ENXIO);
     }
 
+    // TODO: Convert to const SEC_PROT_LIST_LENGTH_OFFSET
     let sec_prot_list_len: u16 = u16::from_be_bytes(
         cmd.dxferp[6..=7]
             .try_into()
@@ -593,6 +609,7 @@ pub fn cmd_scsi_get_sec_info(path: &String) -> Result<(), Errno> {
     // As per SFCR: Table 27 — Supported security protocols SECURITY PROTOCOL IN parameter data
     // Protocol list start at offset 8...N, where N indicates the total length, in bytes,
     // N = sec_prot_list_len
+    // TODO: Convert to const SEC_PROT_LIST_HEADER_SIZE
     // bufsz - 8 => the remaining bytes in this header
     assert!((sec_prot_list_len as u32) < bufsz - 8);
     // If `SUPPORTED SECURITY PROTOCOL` is supported, this length shall be
@@ -603,6 +620,7 @@ pub fn cmd_scsi_get_sec_info(path: &String) -> Result<(), Errno> {
         warn!("No security protocols supported by: {:?}", path);
     }
     let mut spdm_support = false;
+    // TODO: Convert to const SEC_PROT_LIST_DATA_OFFSET
     for i in 0..sec_prot_list_len {
         if let Ok(sec_prot) = SpcSecurityProtocols::try_from(cmd.dxferp[(8 + i) as usize]) {
             info!("  {:?}  - Supported", sec_prot);
@@ -638,6 +656,7 @@ pub fn cmd_scsi_get_info(path: &String) -> Result<(), Errno> {
     // 1. Open device
     let dev = BlkDev::new(path, OFlag::O_RDONLY)?;
     // 2. Generate command
+    // TODO: Convert to const INQUIRY_BUFFER_SIZE
     let mut cmd = SgCmd::gen_dev_inquiry_info(0, SG_DXFER_FROM_DEV, 64)?;
     // 3. Execute CMD
     if let Some(fd) = &dev.fd {
@@ -648,6 +667,7 @@ pub fn cmd_scsi_get_info(path: &String) -> Result<(), Errno> {
         return Err(Errno::ENXIO);
     }
 
+    // TODO: Convert to const INQUIRY_VENDOR_OFFSET, INQUIRY_PRODUCT_ID_OFFSET, INQUIRY_REVISION_OFFSET
     // 4. Display results
     let vendor = String::from_utf8(cmd.dxferp[8..8 + (DEV_VENDOR_LEN - 1)].to_vec()).unwrap();
     let id = String::from_utf8(cmd.dxferp[16..16 + (DEV_ID_LEN - 1)].to_vec()).unwrap();
